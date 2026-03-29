@@ -4,6 +4,12 @@
 
 **Reinforcement Learning for Adaptive Traffic Signal Control under Nonstationary Traffic Demand**
 
+## Team
+
+**Team Black Swan**
+
+Members: Zichao Zhang, Shawn Wu, Tyler Tao, Jinghan Lei
+
 ## Abstract
 
 Adaptive traffic signal control is a natural sequential decision-making problem because each signal decision affects not only immediate vehicle departures but also future queue growth, cumulative waiting time, and subsequent control choices. In this project, we study a single-intersection traffic light control task under stochastic and nonstationary traffic demand and formulate it as a finite-horizon Markov Decision Process. At each time step, the agent observes traffic conditions, including queue lengths, the current signal phase, and phase duration, and chooses whether to keep the current phase or switch to the alternative phase. We build a lightweight simulator with stochastic arrivals, phase-dependent departures, and switching losses, and we compare a reinforcement learning controller against strong non-learning baselines, including fixed-cycle and queue-based heuristic policies. Our primary objective is not to propose a novel RL algorithm, but to conduct a controlled empirical study of when RL can match or outperform traditional rule-based control, particularly under asymmetric and nonstationary traffic patterns. We expect RL to perform competitively in stationary settings and to show clearer advantages when demand changes over time.
@@ -212,9 +218,10 @@ The main project risk is over-expanding the environment. A multi-intersection ne
 
 To keep development parallel and balanced across the group, we propose the following division of work:
 
-- **Member 1:** environment implementation, traffic regimes, and baseline controllers
-- **Member 2:** RL implementation, training pipeline, and tuning
-- **Member 3:** evaluation, visualization, report writing, and presentation preparation
+- **Zichao Zhang:** environment design, simulator implementation, and integration of the overall project pipeline
+- **Shawn Wu:** baseline controller implementation, traffic-regime construction, and simulator validation
+- **Tyler Tao:** RL implementation, DQN training pipeline, and hyperparameter tuning
+- **Jinghan Lei:** evaluation, visualization, report writing, and presentation preparation
 
 This split allows the project to progress in parallel while keeping ownership of each component clear.
 
