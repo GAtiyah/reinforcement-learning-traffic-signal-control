@@ -80,6 +80,7 @@ def main() -> None:
     end_epsilon = float(train_config.get("end_epsilon", 0.05))
     epsilon_decay_steps = int(train_config.get("epsilon_decay_steps", 20_000))
     base_seed = int(train_config.get("seed", 0))
+    epsilon = end_epsilon
 
     print("Training DQN...\n")
     for episode_idx in range(episodes):
