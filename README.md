@@ -2,6 +2,23 @@
 
 This repository is a starter project for a group Reinforcement Learning course project on adaptive traffic signal control under nonstationary traffic demand.
 
+## Status
+
+Implemented now:
+
+- single-intersection simulator with stochastic arrivals
+- three heuristic baselines: fixed-cycle, queue-threshold, max-pressure
+- DQN training loop with replay buffer and target network
+- JSON result outputs for baselines and DQN training/evaluation
+- smoke tests for the environment and the main scripts
+
+Planned but not included yet:
+
+- finished analysis notebooks
+- presentation-ready plots and figures
+- checkpoint resume / experiment tracking
+- multi-intersection extensions
+
 ## Project Goal
 
 We study a single-intersection control problem where an agent decides whether to keep or switch the signal phase at each time step. The goal is to reduce long-term congestion under stationary and nonstationary traffic regimes.
@@ -90,16 +107,24 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+Optional extras for notebooks, plotting, alternative YAML parsing, and local test tooling:
+
+```bash
+pip install -r requirements-optional.txt
+```
+
 Run the baselines:
 
 ```bash
 python3 scripts/run_baselines.py --config configs/default.yaml
+python3 scripts/summarize_results.py results/baseline_summary.json
 ```
 
 Train the DQN starter:
 
 ```bash
 python3 scripts/train_dqn.py --config configs/default.yaml
+python3 scripts/summarize_results.py results/dqn_summary.json
 ```
 
 Run the smoke tests:
@@ -121,6 +146,14 @@ python3 -m unittest discover -s tests
 - Environment and baselines: simulator, arrival regimes, fixed-cycle and heuristic policies
 - RL training: DQN implementation, tuning, checkpointing
 - Evaluation and presentation: metrics, plots, ablation studies, report/slides
+
+## Outputs
+
+Main generated artifacts:
+
+- `results/baseline_summary.json`
+- `results/dqn_summary.json`
+- `results/checkpoints/dqn_policy.pt`
 
 ## Immediate Next Files To Edit
 
