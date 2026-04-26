@@ -4,167 +4,186 @@
 from __future__ import annotations
 
 import argparse
-import json
 from pathlib import Path
 import sys
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
-from traffic_rl.baselines import FixedCycleController, MaxPressureController, QueueThresholdController
-from traffic_rl.config import build_env_kwargs, load_config
-from traffic_rl.dqn import DQNAgent, DQNConfig
-from traffic_rl.env import AdaptiveTrafficSignalEnv
-from traffic_rl.evaluation import evaluate_policies
+from traffic_rl.config import apply_overrides, load_config, parse_override_strings
+from traffic_rl.experiments import train_and_evaluate_dqn, train_and_evaluate_dqn_multiseed
+from traffic_rl.visualization import generate_experiment_plots
+
+DEFAULT_CONFIG = "configs/default.yaml"
+DEFAULT_CHECKPOINT = "results/checkpoints/dqn_policy.pt"
+DEFAULT_SUMMARY_OUTPUT = "results/dqn_summary.json"
+DEFAULT_PLOT_DIR = "results/plots/dqn"
+DEFAULT_MULTI_SEED_SUMMARY_OUTPUT = "results/dqn_multiseed_summary.json"
+DEFAULT_MULTI_SEED_OUTPUT_DIR = "results/multiseed"
+
+PROFILE_DEFAULTS = {
+    "1x1": {
+        "config": "configs/default.yaml",
+        "checkpoint": "results/experiments/1x1/dqn_policy.pt",
+        "summary_output": "results/experiments/1x1/dqn_summary.json",
+        "plot_dir": "results/plots/experiments/1x1",
+        "multiseed_summary_output": "results/experiments/1x1/dqn_multiseed_summary.json",
+        "multiseed_output_dir": "results/experiments/1x1/multiseed",
+    },
+    "2x2": {
+        "config": "configs/grid_2x2.yaml",
+        "checkpoint": "results/experiments/2x2/dqn_policy.pt",
+        "summary_output": "results/experiments/2x2/dqn_summary.json",
+        "plot_dir": "results/plots/experiments/2x2",
+        "multiseed_summary_output": "results/experiments/2x2/dqn_multiseed_summary.json",
+        "multiseed_output_dir": "results/experiments/2x2/multiseed",
+    },
+}
 
 
-def linear_epsilon(global_step: int, start: float, end: float, decay_steps: int) -> float:
-    if global_step >= decay_steps:
-        return end
-    fraction = global_step / max(decay_steps, 1)
-    return start + fraction * (end - start)
+def parse_seed_list(raw_value: str | None) -> list[int]:
+    """Parse comma-separated seed values from CLI input."""
+    if raw_value is None or not raw_value.strip():
+        return []
+    seeds = []
+    for item in raw_value.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        seeds.append(int(item))
+    if not seeds:
+        raise ValueError("--seeds must include at least one integer seed")
+    return seeds
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
+        "--profile",
+        choices=sorted(PROFILE_DEFAULTS),
+        default=None,
+        help="Use standard paths for a 1x1 or 2x2 experiment.",
+    )
+    parser.add_argument(
         "--config",
         type=str,
-        default="configs/default.yaml",
+        default=DEFAULT_CONFIG,
         help="Path to YAML config.",
     )
     parser.add_argument(
         "--checkpoint",
         type=str,
-        default="results/checkpoints/dqn_policy.pt",
+        default=DEFAULT_CHECKPOINT,
         help="Path to save the trained model.",
     )
     parser.add_argument(
         "--summary-output",
         type=str,
-        default="results/dqn_summary.json",
+        default=DEFAULT_SUMMARY_OUTPUT,
         help="Path to save training and evaluation metrics.",
+    )
+    parser.add_argument(
+        "--plot-dir",
+        type=str,
+        default=DEFAULT_PLOT_DIR,
+        help="Directory to save training/evaluation plots.",
+    )
+    parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        help="Override config values, e.g. --set training.learning_rate=0.0005",
+    )
+    parser.add_argument(
+        "--seeds",
+        type=str,
+        default=None,
+        help="Comma-separated seed list for a multi-seed DQN run, e.g. 7,17,27.",
+    )
+    parser.add_argument(
+        "--multiseed-summary-output",
+        type=str,
+        default=DEFAULT_MULTI_SEED_SUMMARY_OUTPUT,
+        help="Path to save aggregated multi-seed metrics.",
+    )
+    parser.add_argument(
+        "--multiseed-output-dir",
+        type=str,
+        default=DEFAULT_MULTI_SEED_OUTPUT_DIR,
+        help="Directory for per-seed checkpoints and summaries.",
+    )
+    parser.add_argument(
+        "--no-plots",
+        action="store_true",
+        help="Skip plot generation.",
     )
     args = parser.parse_args()
 
-    config = load_config(PROJECT_ROOT / args.config)
-    env_config = config["environment"]
-    train_config = config["training"]
-    eval_config = config["evaluation"]
-
-    train_env = AdaptiveTrafficSignalEnv(
-        **build_env_kwargs(env_config, env_config["train_schedule"]),
-        seed=int(train_config.get("seed", 0)),
+    profile_defaults = PROFILE_DEFAULTS.get(args.profile, {})
+    config_path_arg = (
+        profile_defaults.get("config", args.config)
+        if args.config == DEFAULT_CONFIG
+        else args.config
+    )
+    checkpoint_arg = (
+        profile_defaults.get("checkpoint", args.checkpoint)
+        if args.checkpoint == DEFAULT_CHECKPOINT
+        else args.checkpoint
+    )
+    summary_output_arg = (
+        profile_defaults.get("summary_output", args.summary_output)
+        if args.summary_output == DEFAULT_SUMMARY_OUTPUT
+        else args.summary_output
+    )
+    plot_dir_arg = (
+        profile_defaults.get("plot_dir", args.plot_dir)
+        if args.plot_dir == DEFAULT_PLOT_DIR
+        else args.plot_dir
+    )
+    multiseed_summary_output_arg = (
+        profile_defaults.get("multiseed_summary_output", args.multiseed_summary_output)
+        if args.multiseed_summary_output == DEFAULT_MULTI_SEED_SUMMARY_OUTPUT
+        else args.multiseed_summary_output
+    )
+    multiseed_output_dir_arg = (
+        profile_defaults.get("multiseed_output_dir", args.multiseed_output_dir)
+        if args.multiseed_output_dir == DEFAULT_MULTI_SEED_OUTPUT_DIR
+        else args.multiseed_output_dir
     )
 
-    agent = DQNAgent(
-        observation_dim=train_env.observation_dim,
-        action_dim=train_env.action_dim,
-        config=DQNConfig(
-            gamma=float(train_config.get("gamma", 0.99)),
-            learning_rate=float(train_config.get("learning_rate", 1e-3)),
-            batch_size=int(train_config.get("batch_size", 64)),
-            buffer_size=int(train_config.get("buffer_size", 50_000)),
-            hidden_dims=tuple(train_config.get("hidden_dims", [128, 128])),
-            target_sync_steps=int(train_config.get("target_sync_steps", 250)),
-            device=str(train_config.get("device", "cpu")),
-        ),
+    overrides = parse_override_strings(args.overrides)
+    config = apply_overrides(load_config(PROJECT_ROOT / config_path_arg), overrides)
+    seeds = parse_seed_list(args.seeds)
+
+    if seeds:
+        train_and_evaluate_dqn_multiseed(
+            config=config,
+            seeds=seeds,
+            output_dir=PROJECT_ROOT / multiseed_output_dir_arg,
+            summary_path=PROJECT_ROOT / multiseed_summary_output_arg,
+            verbose=True,
+        )
+        return
+
+    checkpoint_path = PROJECT_ROOT / checkpoint_arg
+    output_path = PROJECT_ROOT / summary_output_arg
+
+    summary = train_and_evaluate_dqn(
+        config=config,
+        checkpoint_path=checkpoint_path,
+        summary_path=output_path,
+        verbose=True,
     )
 
-    global_step = 0
-    training_history = []
-    episodes = int(train_config.get("episodes", 250))
-    warmup_steps = int(train_config.get("warmup_steps", 500))
-    update_frequency = int(train_config.get("update_frequency", 1))
-    start_epsilon = float(train_config.get("start_epsilon", 1.0))
-    end_epsilon = float(train_config.get("end_epsilon", 0.05))
-    epsilon_decay_steps = int(train_config.get("epsilon_decay_steps", 20_000))
-    base_seed = int(train_config.get("seed", 0))
-    epsilon = end_epsilon
-
-    print("Training DQN...\n")
-    for episode_idx in range(episodes):
-        observation, _ = train_env.reset(seed=base_seed + episode_idx)
-        done = False
-        losses = []
-
-        while not done:
-            epsilon = linear_epsilon(global_step, start_epsilon, end_epsilon, epsilon_decay_steps)
-            action = agent.act(observation, epsilon=epsilon)
-            next_observation, reward, done, _ = train_env.step(action)
-            agent.observe(observation, action, reward, next_observation, done)
-
-            if global_step >= warmup_steps and global_step % update_frequency == 0:
-                loss = agent.update()
-                if loss is not None:
-                    losses.append(loss)
-
-            observation = next_observation
-            global_step += 1
-
-        summary = train_env.summarize()
-        summary["episode"] = float(episode_idx)
-        summary["epsilon"] = float(epsilon)
-        if losses:
-            summary["mean_loss"] = float(sum(losses) / len(losses))
-        training_history.append(summary)
-
-        if (episode_idx + 1) % 25 == 0 or episode_idx == 0:
-            print(
-                f"Episode {episode_idx + 1:4d}/{episodes} | "
-                f"reward={summary['total_reward']:.2f} | "
-                f"avg_queue={summary['average_queue_length']:.2f} | "
-                f"avg_wait_s={summary['average_wait_time_seconds']:.2f} | "
-                f"epsilon={summary['epsilon']:.3f}"
-            )
-
-    checkpoint_path = PROJECT_ROOT / args.checkpoint
-    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
-    agent.save(str(checkpoint_path))
-
-    policies = {
-        "fixed_cycle": FixedCycleController(cycle_length=10),
-        "queue_threshold": QueueThresholdController(threshold=5.0, min_green=3),
-        "max_pressure": MaxPressureController(min_green=2),
-        "dqn": lambda observation: agent.act(observation, epsilon=0.0),
-    }
-
-    evaluation_results: dict[str, dict[str, dict[str, float]]] = {}
-    print("\nEvaluating trained DQN...\n")
-    for regime_name, schedule in env_config["evaluation_regimes"].items():
-        env_kwargs = build_env_kwargs(env_config, schedule)
-        env_factory = lambda env_kwargs=env_kwargs: AdaptiveTrafficSignalEnv(**env_kwargs)
-        regime_results = evaluate_policies(
-            env_factory=env_factory,
-            policies=policies,
-            episodes=int(eval_config.get("episodes_per_regime", 10)),
-            base_seed=10_000,
-        )
-        evaluation_results[regime_name] = regime_results
-
-        dqn_summary = regime_results["dqn"]
-        print(
-            f"{regime_name:18s} | "
-            f"avg_queue={dqn_summary['average_queue_length']:.2f} | "
-            f"avg_wait_s={dqn_summary['average_wait_time_seconds']:.2f} | "
-            f"throughput={dqn_summary['throughput_per_step']:.2f}"
-        )
-
-    output_path = PROJECT_ROOT / args.summary_output
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with output_path.open("w", encoding="utf-8") as file:
-        json.dump(
-            {
-                "training_history": training_history,
-                "evaluation_results": evaluation_results,
-                "checkpoint": str(checkpoint_path),
-            },
-            file,
-            indent=2,
-        )
-
-    print(f"\nSaved checkpoint to {checkpoint_path}")
-    print(f"Saved training summary to {output_path}")
+    if not args.no_plots:
+        try:
+            plot_paths = generate_experiment_plots(summary, PROJECT_ROOT / plot_dir_arg)
+            print("Saved plots:")
+            for plot_path in plot_paths:
+                print(f"  {plot_path}")
+        except ModuleNotFoundError as error:
+            print(f"Skipping plots: {error}")
 
 
 if __name__ == "__main__":
